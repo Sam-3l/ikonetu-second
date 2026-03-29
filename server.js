@@ -1,4 +1,3 @@
-// server.js — runs pre-compiled JS, no ts-node at runtime
 const express = require('express');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const { spawn } = require('child_process');
@@ -16,15 +15,26 @@ const services = [
   { name: 'roles-service',   port: 3013, prefixes: ['/api/v1/investors', '/api/v1/providers', '/api/v1/universities'] },
 ];
 
-services.forEach(({ name, port }) => {
+// Start services one at a time with a delay between each
+// so ts-node doesn't compile all 5 simultaneously and blow memory
+function startService(index) {
+  if (index >= services.length) {
+    console.log('All services started');
+    return;
+  }
+  const { name, port } = services[index];
   const env = { ...process.env, PORT: String(port) };
-  // Run compiled JS, not TypeScript
-  const child = spawn('node', [`services/${name}/dist/index.js`], { env, stdio: 'inherit' });
+  const child = spawn('node', ['-r', 'ts-node/register', '-r', 'tsconfig-paths/register', `services/${name}/src/index.ts`], { env, stdio: 'inherit' });
   child.on('error', err => console.error(`Failed to start ${name}:`, err.message));
   child.on('exit', code => console.error(`${name} exited with code ${code}`));
-  console.log(`▶ Started ${name} on port ${port}`);
-});
+  console.log(`▶ Starting ${name} on port ${port}`);
+  // Wait 15 seconds before starting next service
+  setTimeout(() => startService(index + 1), 15000);
+}
 
+startService(0);
+
+// Start gateway after all services have had time to boot (5 services x 15s + 15s buffer)
 setTimeout(() => {
   services.forEach(({ prefixes, port }) => {
     prefixes.forEach(prefix => {
@@ -39,4 +49,4 @@ setTimeout(() => {
   });
 
   app.listen(PORT, () => console.log(`✅ Gateway on port ${PORT}`));
-}, 5000);
+}, 90000);
