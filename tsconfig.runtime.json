@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "moduleResolution": "node",
+    "skipLibCheck": true,
+    "strict": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noImplicitReturns": false,
+    "paths": {
+      "@ikonetu/config": ["./packages/config/src/env.ts"],
+      "@ikonetu/config/*": ["./packages/config/src/*"],
+      "@ikonetu/database": ["./packages/database/src/connection.ts"],
+      "@ikonetu/database/*": ["./packages/database/src/*"],
+      "@ikonetu/shared/middleware": ["./packages/shared/src/middleware/index.ts"],
+      "@ikonetu/shared/encryption": ["./packages/shared/src/encryption/index.ts"],
+      "@ikonetu/shared/circuit-breaker": ["./packages/shared/src/circuit-breaker/index.ts"],
+      "@ikonetu/shared/sentry": ["./packages/shared/src/sentry/index.ts"]
+    },
+    "baseUrl": "."
+  }
+}
