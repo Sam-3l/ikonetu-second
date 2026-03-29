@@ -16,7 +16,7 @@ const services = [
   { name: 'roles-service',   port: 3013, prefixes: ['/api/v1/investors', '/api/v1/providers', '/api/v1/universities'] },
 ];
 
-// Start services one at a time to avoid blowing the 512MB memory limit
+// Start services one at a time to stay within 512MB memory limit
 function startService(index) {
   if (index >= services.length) {
     console.log('✅ All services started');
@@ -27,13 +27,16 @@ function startService(index) {
   const env = {
     ...process.env,
     PORT: String(port),
-    TS_NODE_PROJECT: 'tsconfig.runtime.json',
-    TS_NODE_TRANSPILE_ONLY: 'true',
   };
 
+  // ts-node/register/transpile-only skips all type checking — no TS errors, lower memory
   const child = spawn(
     'node',
-    ['-r', 'ts-node/register', '-r', 'tsconfig-paths/register', `services/${name}/src/index.ts`],
+    [
+      '-r', 'ts-node/register/transpile-only',
+      '-r', 'tsconfig-paths/register',
+      `services/${name}/src/index.ts`,
+    ],
     { env, stdio: 'inherit' }
   );
 
@@ -42,16 +45,14 @@ function startService(index) {
 
   console.log(`▶ Starting ${name} on port ${port}`);
 
-  // Wait 20s before starting the next service
+  // Wait 20s before starting next service to keep memory usage low
   setTimeout(() => startService(index + 1), 20000);
 }
 
 // Boot all services sequentially
 startService(0);
 
-// Total boot time: 5 services x 20s = 100s, add 20s buffer = 120s
-const GATEWAY_DELAY = 120000;
-
+// Start gateway after all services have booted (5 x 20s + 20s buffer)
 setTimeout(() => {
   services.forEach(({ prefixes, port }) => {
     prefixes.forEach((prefix) => {
@@ -75,4 +76,4 @@ setTimeout(() => {
     console.log(`\n✅ Gateway running on port ${PORT}`);
     console.log(`   Proxying ${services.length} core services\n`);
   });
-}, GATEWAY_DELAY);
+}, 120000);
