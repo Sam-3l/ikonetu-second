@@ -1,0 +1,244 @@
+name: IkonetU CI/CD
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main]
+
+env:
+  GCP_PROJECT: ikonetu
+  GCP_REGION:  europe-west2
+  REGISTRY:    europe-west2-docker.pkg.dev/ikonetu/ikonetu
+
+jobs:
+  lint:
+    name: Lint & invariant guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx eslint . --ext .ts,.tsx --max-warnings 0
+      - name: Guard dark mode
+        run: |
+          if grep -rn --include="*.ts" --include="*.tsx" "dark.mode\|darkMode" services/ packages/ frontend/src/ 2>/dev/null; then
+            echo "INVARIANT: dark mode reference found" && exit 1
+          fi
+          echo "✅ dark mode guard passed"
+      - name: Guard R11
+        run: |
+          if grep -rn --include="*.ts" "R11_ACTIVE.*true" services/ packages/ 2>/dev/null; then
+            echo "INVARIANT: R11 activated" && exit 1
+          fi
+          echo "✅ R11 guard passed"
+      - name: Guard score_history append-only
+        run: |
+          if grep -rn --include="*.ts" "score_history.*\.update" services/ packages/ 2>/dev/null; then
+            echo "INVARIANT: score_history update found" && exit 1
+          fi
+          echo "✅ score_history guard passed"
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: npm run test:unit -- --coverage --ci
+
+  integration-tests:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env: { POSTGRES_DB: ikonetu_test, POSTGRES_USER: ikonetu_test, POSTGRES_PASSWORD: test_password }
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - name: Migrate
+        env: { DB_HOST: localhost, DB_PORT: 5432, DB_NAME: ikonetu_test, DB_USER: ikonetu_test, DB_PASSWORD: test_password, DB_SSL: 'false' }
+        run: npm run migrate
+      - name: Test
+        env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: ikonetu_test
+          DB_USER: ikonetu_test
+          DB_PASSWORD: test_password
+          DB_SSL: 'false'
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: ${{ secrets.JWT_SECRET_TEST }}
+          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET_TEST }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY_TEST }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY_TEST }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET_TEST }}
+          STRIPE_CONNECT_CLIENT_ID: ${{ secrets.STRIPE_CONNECT_CLIENT_ID }}
+          PAYSTACK_SECRET_KEY: ${{ secrets.PAYSTACK_SECRET_KEY_TEST }}
+          PAYSTACK_PUBLIC_KEY: ${{ secrets.PAYSTACK_PUBLIC_KEY_TEST }}
+          PAYSTACK_WEBHOOK_SECRET: test_webhook_secret_minimum_32chars
+          GCS_BUCKET: ikonetu-test
+          GCS_REGION: europe-west2
+          GOOGLE_CLOUD_PROJECT: ikonetu
+          PUBSUB_PROJECT_ID: ikonetu
+          BIGQUERY_DATASET: ikonetu_test
+          BIGQUERY_PROJECT: ikonetu
+          R12_COMMISSION_PCT: '9.5'
+          R11_ACTIVE: 'false'
+          DARK_MODE_ENABLED: 'false'
+          APP_URL: http://localhost:5173
+        run: npm run test:integration
+
+  security:
+    name: Security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: semgrep/semgrep-action@v1
+        with: { config: auto }
+      - uses: gitleaks/gitleaks-action@v2
+        env: { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
+      - run: npm ci && npm audit --audit-level=high
+
+  build:
+    name: Build & push images
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests, integration-tests, security]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
+    strategy:
+      matrix:
+        service:
+          - auth-service
+          - user-service
+          - scoring-service
+          - consent-service
+          - bankability-service
+          - venture-service
+          - scout-service
+          - billing-service
+          - notification-service
+          - analytics-service
+          - admin-service
+          - roles-service
+          - acxm-service
+          - compliance-service
+          - media-service
+          - search-service
+          - report-service
+          - api-metering-service
+    steps:
+      - uses: actions/checkout@v4
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with: { credentials_json: '${{ secrets.GCP_SA_KEY }}' }
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker europe-west2-docker.pkg.dev
+      - name: Build & push ${{ matrix.service }}
+        run: |
+          IMAGE=${{ env.REGISTRY }}/${{ matrix.service }}:${{ github.sha }}
+          docker build --build-arg SERVICE_NAME=${{ matrix.service }} \
+            --cache-from ${{ env.REGISTRY }}/${{ matrix.service }}:latest \
+            -t $IMAGE -t ${{ env.REGISTRY }}/${{ matrix.service }}:latest .
+          docker push $IMAGE
+          docker push ${{ env.REGISTRY }}/${{ matrix.service }}:latest
+
+  deploy-staging:
+    name: Deploy → staging
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/staging'
+    environment: staging
+    strategy:
+      matrix:
+        service:
+          - auth-service
+          - user-service
+          - scoring-service
+          - consent-service
+          - bankability-service
+          - venture-service
+          - billing-service
+          - notification-service
+          - analytics-service
+          - admin-service
+          - roles-service
+          - acxm-service
+          - compliance-service
+          - search-service
+          - report-service
+          - api-metering-service
+    steps:
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with: { credentials_json: '${{ secrets.GCP_SA_KEY }}' }
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Deploy ${{ matrix.service }}
+        run: |
+          gcloud run deploy ${{ matrix.service }}-staging \
+            --image ${{ env.REGISTRY }}/${{ matrix.service }}:${{ github.sha }} \
+            --region ${{ env.GCP_REGION }} --platform managed \
+            --allow-unauthenticated \
+            --set-secrets "NODE_ENV=NODE_ENV:latest,DB_HOST=DB_HOST_STAGING:latest,DB_USER=DB_USER:latest,DB_PASSWORD=DB_PASSWORD_STAGING:latest,DB_NAME=DB_NAME:latest,REDIS_URL=REDIS_URL_STAGING:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,ENCRYPTION_KEY=ENCRYPTION_KEY:latest,SENDGRID_API_KEY=SENDGRID_API_KEY:latest,STRIPE_SECRET_KEY=STRIPE_SECRET_KEY_TEST:latest,STRIPE_WEBHOOK_SECRET=STRIPE_WEBHOOK_SECRET_STAGING:latest,STRIPE_CONNECT_CLIENT_ID=STRIPE_CONNECT_CLIENT_ID:latest,PAYSTACK_SECRET_KEY=PAYSTACK_SECRET_KEY_TEST:latest,PAYSTACK_PUBLIC_KEY=PAYSTACK_PUBLIC_KEY_TEST:latest,PAYSTACK_WEBHOOK_SECRET=PAYSTACK_WEBHOOK_SECRET:latest,GCS_BUCKET=GCS_BUCKET:latest,GCS_REGION=GCS_REGION:latest,GOOGLE_CLOUD_PROJECT=GOOGLE_CLOUD_PROJECT:latest,GOOGLE_MAPS_API_KEY=GOOGLE_MAPS_API_KEY:latest,PUBSUB_PROJECT_ID=PUBSUB_PROJECT_ID:latest,BIGQUERY_DATASET=BIGQUERY_DATASET:latest,BIGQUERY_PROJECT=BIGQUERY_PROJECT:latest,R12_COMMISSION_PCT=R12_COMMISSION_PCT:latest,R11_ACTIVE=R11_ACTIVE:latest,DARK_MODE_ENABLED=DARK_MODE_ENABLED:latest,APP_URL=APP_URL_STAGING:latest,SENTRY_DSN=SENTRY_DSN:latest" \
+            --min-instances 0 --max-instances 5 --memory 512Mi --cpu 1
+
+  deploy-production:
+    name: Deploy → production
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    strategy:
+      matrix:
+        service:
+          - auth-service
+          - user-service
+          - scoring-service
+          - consent-service
+          - bankability-service
+          - venture-service
+          - scout-service
+          - billing-service
+          - notification-service
+          - analytics-service
+          - admin-service
+          - roles-service
+          - acxm-service
+          - compliance-service
+          - media-service
+          - search-service
+          - report-service
+          - api-metering-service
+    steps:
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with: { credentials_json: '${{ secrets.GCP_SA_KEY }}' }
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Deploy ${{ matrix.service }}
+        run: |
+          gcloud run deploy ${{ matrix.service }} \
+            --image ${{ env.REGISTRY }}/${{ matrix.service }}:${{ github.sha }} \
+            --region ${{ env.GCP_REGION }} --platform managed \
+            --no-allow-unauthenticated \
+            --set-secrets "NODE_ENV=NODE_ENV:latest,DB_HOST=DB_HOST_PROD:latest,DB_USER=DB_USER:latest,DB_PASSWORD=DB_PASSWORD_PROD:latest,DB_NAME=DB_NAME:latest,REDIS_URL=REDIS_URL_PROD:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,ENCRYPTION_KEY=ENCRYPTION_KEY:latest,SENDGRID_API_KEY=SENDGRID_API_KEY:latest,STRIPE_SECRET_KEY=STRIPE_SECRET_KEY_PROD:latest,STRIPE_WEBHOOK_SECRET=STRIPE_WEBHOOK_SECRET_PROD:latest,STRIPE_CONNECT_CLIENT_ID=STRIPE_CONNECT_CLIENT_ID:latest,PAYSTACK_SECRET_KEY=PAYSTACK_SECRET_KEY_PROD:latest,PAYSTACK_PUBLIC_KEY=PAYSTACK_PUBLIC_KEY_PROD:latest,PAYSTACK_WEBHOOK_SECRET=PAYSTACK_WEBHOOK_SECRET:latest,GCS_BUCKET=GCS_BUCKET:latest,GCS_REGION=GCS_REGION:latest,GOOGLE_CLOUD_PROJECT=GOOGLE_CLOUD_PROJECT:latest,GOOGLE_MAPS_API_KEY=GOOGLE_MAPS_API_KEY:latest,PUBSUB_PROJECT_ID=PUBSUB_PROJECT_ID:latest,BIGQUERY_DATASET=BIGQUERY_DATASET:latest,BIGQUERY_PROJECT=BIGQUERY_PROJECT:latest,R12_COMMISSION_PCT=R12_COMMISSION_PCT:latest,R11_ACTIVE=R11_ACTIVE:latest,DARK_MODE_ENABLED=DARK_MODE_ENABLED:latest,APP_URL=APP_URL_PROD:latest,SENTRY_DSN=SENTRY_DSN:latest,COMPANIES_HOUSE_API_KEY=COMPANIES_HOUSE_API_KEY:latest" \
+            --min-instances 1 --max-instances 20 --memory 1Gi --cpu 2 --concurrency 100
+      - name: Smoke test
+        run: |
+          URL=$(gcloud run services describe ${{ matrix.service }} --region ${{ env.GCP_REGION }} --format='value(status.url)')
+          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$URL/health" || echo "000")
+          [ "$STATUS" = "200" ] && echo "✅ ${{ matrix.service }} healthy" || (echo "❌ ${{ matrix.service }} unhealthy: $STATUS" && exit 1)

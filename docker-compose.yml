@@ -1,0 +1,174 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ikonetu
+      POSTGRES_USER: ikonetu_app
+      POSTGRES_PASSWORD: dev_password_change_in_prod
+    ports: ["5432:5432"]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ikonetu_app -d ikonetu"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports: ["6379:6379"]
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+
+  auth-service:
+    build: {context: ., args: {SERVICE_NAME: auth-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres, REDIS_URL: "redis://redis:6379"}
+    ports: ["3001:3001"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    restart: unless-stopped
+
+  user-service:
+    build: {context: ., args: {SERVICE_NAME: user-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres, REDIS_URL: "redis://redis:6379"}
+    ports: ["3002:3002"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    restart: unless-stopped
+
+  scoring-service:
+    build: {context: ., args: {SERVICE_NAME: scoring-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres, REDIS_URL: "redis://redis:6379"}
+    ports: ["3003:3003"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    restart: unless-stopped
+
+  consent-service:
+    build: {context: ., args: {SERVICE_NAME: consent-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres, REDIS_URL: "redis://redis:6379"}
+    ports: ["3004:3004"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    restart: unless-stopped
+
+  bankability-service:
+    build: {context: ., args: {SERVICE_NAME: bankability-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres, REDIS_URL: "redis://redis:6379"}
+    ports: ["3005:3005"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    restart: unless-stopped
+
+  venture-service:
+    build: {context: ., args: {SERVICE_NAME: venture-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres, REDIS_URL: "redis://redis:6379"}
+    ports: ["3006:3006"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    restart: unless-stopped
+
+  scout-service:
+    build: {context: ., args: {SERVICE_NAME: scout-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres, REDIS_URL: "redis://redis:6379"}
+    ports: ["3007:3007"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    restart: unless-stopped
+
+  billing-service:
+    build: {context: ., args: {SERVICE_NAME: billing-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres, REDIS_URL: "redis://redis:6379"}
+    ports: ["3008:3008"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    restart: unless-stopped
+
+  notification-service:
+    build: {context: ., args: {SERVICE_NAME: notification-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres, REDIS_URL: "redis://redis:6379"}
+    ports: ["3010:3010"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    restart: unless-stopped
+
+  analytics-service:
+    build: {context: ., args: {SERVICE_NAME: analytics-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres, REDIS_URL: "redis://redis:6379"}
+    ports: ["3011:3011"]
+    depends_on: {postgres: {condition: service_healthy}}
+    restart: unless-stopped
+
+  admin-service:
+    build: {context: ., args: {SERVICE_NAME: admin-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres, REDIS_URL: "redis://redis:6379"}
+    ports: ["3012:3012"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    restart: unless-stopped
+
+  roles-service:
+    build: {context: ., args: {SERVICE_NAME: roles-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres, REDIS_URL: "redis://redis:6379"}
+    ports: ["3013:3013"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    restart: unless-stopped
+
+  acxm-service:
+    build: {context: ., args: {SERVICE_NAME: acxm-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres, REDIS_URL: "redis://redis:6379"}
+    ports: ["3014:3014"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    restart: unless-stopped
+
+  compliance-service:
+    build: {context: ., args: {SERVICE_NAME: compliance-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres, REDIS_URL: "redis://redis:6379"}
+    ports: ["3015:3015"]
+    depends_on: {postgres: {condition: service_healthy}}
+    restart: unless-stopped
+
+  media-service:
+    build: {context: ., args: {SERVICE_NAME: media-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres, REDIS_URL: "redis://redis:6379"}
+    ports: ["3016:3016"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    restart: unless-stopped
+
+  search-service:
+    build: {context: ., args: {SERVICE_NAME: search-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres, REDIS_URL: "redis://redis:6379"}
+    ports: ["3017:3017"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    restart: unless-stopped
+
+  report-service:
+    build: {context: ., args: {SERVICE_NAME: report-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres}
+    ports: ["3018:3018"]
+    depends_on: {postgres: {condition: service_healthy}}
+    restart: unless-stopped
+
+  api-metering-service:
+    build: {context: ., args: {SERVICE_NAME: api-metering-service}}
+    env_file: .env
+    environment: {PORT: "3001", DB_HOST: postgres, REDIS_URL: "redis://redis:6379"}
+    ports: ["3019:3019"]
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

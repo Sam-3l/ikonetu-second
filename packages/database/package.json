@@ -1,0 +1,25 @@
+{
+  "name": "@ikonetu/database",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "migrate": "ts-node -e \"require('dotenv').config()\" node_modules/.bin/knex migrate:latest --knexfile knexfile.ts",
+    "migrate:rollback": "ts-node -e \"require('dotenv').config()\" node_modules/.bin/knex migrate:rollback --knexfile knexfile.ts",
+    "migrate:status": "ts-node -e \"require('dotenv').config()\" node_modules/.bin/knex migrate:status --knexfile knexfile.ts",
+    "seed": "ts-node -e \"require('dotenv').config()\" node_modules/.bin/knex seed:run --knexfile knexfile.ts",
+    "seed:specific": "ts-node -e \"require('dotenv').config()\" node_modules/.bin/knex seed:run --specific 001_synthetic_data.ts --knexfile knexfile.ts"
+  },
+  "dependencies": {
+    "@ikonetu/config": "*",
+    "knex": "^3.1.0",
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.11.0",
+    "dotenv": "^16.4.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.4.0"
+  }
+}
